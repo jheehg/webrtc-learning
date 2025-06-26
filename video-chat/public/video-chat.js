@@ -1,34 +1,25 @@
 const socket = io().connect('http://localhost:4000');
-const remote_limit = 3;
 
 const roomName = document.getElementById('room-name');
 const joinRoomButton = document.getElementById('join-room-button');
 const videoChatLobby = document.getElementById('video-chat-lobby');
+const muteButton = document.getElementById('mute-button');
 const leaveRoomButton = document.getElementById('leave-room-button');
+const hideCameraButton = document.getElementById('hide-camera-button');
 const roomControls = document.getElementById('room-controls');
 const localVideo = document.getElementById('local-video');
-const remoteVideos = document.querySelectorAll('.remote-video');
+const remoteVideo = document.getElementById('remote-video');
 
-const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-let peerConnection, localStream;
-
+let peerConnection = null;
+let userStream = null;
 let creator = false;
-
-const constraints = {
-  video: { width: 320, height: 240 },
-  audio: true,
-};
+let status = null;
 
 const successCallback = (stream) => {
-  localStream = stream;
-
   videoChatLobby.style.display = 'none';
   roomControls.style.display = 'block';
 
-  localVideo.srcObject = stream;
-  localVideo.onloadedmetadata = () => {
-    localVideo.play();
-  };
+  userStream.setLocalStream(stream);
 
   socket.emit('ready', roomName.value);
 };
@@ -47,10 +38,11 @@ const onIceCandidate = (event) => {
 };
 
 const onTrack = (event) => {
-  remoteVideo.srcObject = event.streams[0];
-  remoteVideo.onloadedmetadata = () => {
-    remoteVideo.play();
-  };
+  userStream.setRemoteStream(event.streams[0]);
+};
+
+const closePeerConnection = () => {
+  peerConnection.closePeerConnection();
 };
 
 joinRoomButton.addEventListener('click', () => {
@@ -63,12 +55,37 @@ joinRoomButton.addEventListener('click', () => {
   }
 });
 
+muteButton.addEventListener('click', () => {
+  const isMuted = userStream.muted;
+  if (isMuted) {
+    userStream.unmuteLocalAudio();
+    muteButton.textContent = 'Mute';
+  } else {
+    userStream.muteLocalAudio();
+    muteButton.textContent = 'Unmute';
+  }
+});
+
+hideCameraButton.addEventListener('click', () => {
+  const isHideCamera = userStream.hideCamera;
+  if (isHideCamera) {
+    userStream.showLocalVideo();
+    hideCameraButton.textContent = 'Hide Camera';
+  } else {
+    userStream.hideLocalVideo();
+    hideCameraButton.textContent = 'Show Camera';
+  }
+});
+
 leaveRoomButton.addEventListener('click', () => {
   socket.emit('leaveRoom', roomName.value);
   videoChatLobby.style.display = 'block';
   roomControls.style.display = 'none';
-  localVideo.pause();
-  localVideo.srcObject = null;
+
+  userStream.clearAllStreams();
+  closePeerConnection();
+
+  socket.emit('leaveRoom', roomName.value);
 });
 
 socket.on('roomCreated', async (data) => {
@@ -76,12 +93,9 @@ socket.on('roomCreated', async (data) => {
   alert(`Room ${data.room} does not exist. We created a new room for you.`);
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: constraints.video,
-      audio: constraints.audio,
-    });
-
-    successCallback(stream);
+    userStream = new Stream({ localVideo, remoteVideo });
+    await userStream.init();
+    successCallback(userStream.localStream);
   } catch (error) {
     errorCallback(error);
   }
@@ -92,12 +106,9 @@ socket.on('roomJoined', async (data) => {
   console.log(`User ${data.userId} joined the room ${data.room}`);
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: constraints.video,
-      audio: constraints.audio,
-    });
-
-    successCallback(stream);
+    userStream = new Stream({ localVideo, remoteVideo });
+    await userStream.init();
+    successCallback(userStream.localStream);
   } catch (error) {
     errorCallback(error);
   }
@@ -108,23 +119,25 @@ socket.on('roomIsFull', (data) => {
 });
 
 socket.on('userLeaved', (data) => {
+  creator = true;
   console.log(`User ${data.userId} left the room.`);
+
+  userStream.clearRemoteStream();
+  closePeerConnection();
 });
 
-socket.on('someOneReady', async (data) => {
-  console.log('someOneReady', data);
+socket.on('someOneIsReady', async (data) => {
+  console.log('someOneIsReady', data);
   if (creator) {
-    peerConnection = new RTCPeerConnection({ iceServers });
-    peerConnection.onicecandidate = onIceCandidate;
-    peerConnection.ontrack = onTrack;
+    peerConnection = new PeerConnection({ socket, roomName: roomName.value });
+
+    const localStream = userStream.localStream;
 
     if (localStream) {
-      peerConnection.addTrack(localStream.getTracks()[0], localStream);
-      peerConnection.addTrack(localStream.getTracks()[1], localStream);
+      peerConnection.addTracks(localStream);
 
       try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
+        const offer = await peerConnection.createUserOffer();
         socket.emit('offer', roomName.value, offer);
       } catch (error) {
         console.error('Error creating offer:', error);
@@ -133,9 +146,8 @@ socket.on('someOneReady', async (data) => {
   }
 });
 
-// 참여자
-socket.on('candidate', (candidate) => {
-  console.log('candidate', candidate);
+socket.on('sendCandidateToRemotePeer', (candidate) => {
+  console.log('sendCandidateToRemotePeer', candidate);
   const iceCandidate = new RTCIceCandidate(candidate);
   peerConnection.addIceCandidate(iceCandidate);
 });
@@ -144,19 +156,15 @@ socket.on('offer', async (offer) => {
   console.log('offer', offer);
 
   if (!creator) {
-    peerConnection = new RTCPeerConnection({ iceServers });
-    peerConnection.onicecandidate = onIceCandidate;
-    peerConnection.ontrack = onTrack;
-    console.log('참여자 localStream', localStream);
+    peerConnection = new PeerConnection({ socket, roomName: roomName.value });
+
+    const localStream = userStream.localStream;
+
     if (localStream) {
-      peerConnection.addTrack(localStream.getTracks()[0], localStream);
-      peerConnection.addTrack(localStream.getTracks()[1], localStream);
+      peerConnection.addTracks(localStream);
 
       try {
-        await peerConnection.setRemoteDescription(offer);
-        const answer = await peerConnection.createAnswer();
-        console.log('참여자 answer', answer);
-        await peerConnection.setLocalDescription(answer);
+        const answer = await peerConnection.createUserAnswer(offer);
         socket.emit('answer', roomName.value, answer);
       } catch (error) {
         console.error('Error creating answer:', error);
@@ -167,5 +175,5 @@ socket.on('offer', async (offer) => {
 
 socket.on('answer', (answer) => {
   console.log('answer', answer);
-  peerConnection.setRemoteDescription(answer);
+  peerConnection.receiveUserAnswer(answer);
 });

@@ -3,7 +3,6 @@ const app = express();
 const server = require('http').createServer(app);
 const io = require('socket.io')(server);
 const PORT = 4000;
-const remote_limit = 3;
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -23,7 +22,7 @@ io.on('connection', (socket) => {
       socket.join(room);
       socket.emit('roomCreated', { room });
     } else {
-      if (currentRoom.size < remote_limit + 1) {
+      if (currentRoom.size === 1) {
         socket.join(room);
         socket.emit('roomJoined', { room, userId: socket.id });
         console.log(`User ${socket.id} joined room ${room}`);
@@ -40,12 +39,12 @@ io.on('connection', (socket) => {
 
   socket.on('ready', (room) => {
     console.log('ready', socket.id, room);
-    socket.broadcast.to(room).emit('someOneReady', { room, userId: socket.id });
+    socket.broadcast.to(room).emit('someOneIsReady', { room, userId: socket.id });
   });
 
   socket.on('candidate', (room, candidate) => {
     console.log('candidate', room, candidate);
-    socket.broadcast.to(room).emit('candidate', candidate);
+    socket.broadcast.to(room).emit('sendCandidateToRemotePeer', candidate);
   });
 
   socket.on('offer', (room, offer) => {

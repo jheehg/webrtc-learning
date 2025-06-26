@@ -14,15 +14,17 @@
     </div>
 
     <div id="room-controls" style="display: none">
+      <button id="mute-button">Mute</button>
+      <button id="hide-camera-button">Hide Camera</button>
       <button id="leave-room-button">Leave Room</button>
     </div>
 
     <div id="video-container">
       <video id="local-video"></video>
-      <video class="remote-video"></video>
-      <video class="remote-video"></video>
-      <video class="remote-video"></video>
+      <video id="remote-video"></video>
     </div>
   </body>
+  <script src="/stream.js"></script>
+  <script src="/connection.js"></script>
   <script src="/video-chat.js"></script>
 </html>

@@ -23,6 +23,7 @@ class Stream {
         video: this.#constraints.video,
         audio: this.#constraints.audio,
       });
+      this.setLocalStream(this.#localStream);
     } catch (error) {
       console.error('Error accessing media devices:', error);
     }
@@ -57,6 +58,11 @@ class Stream {
   }
 
   setLocalStream(stream) {
+    if (!stream) {
+      console.error('[Stream] No local stream to set');
+      return;
+    }
+
     this.#localVideo.srcObject = stream;
     this.#localVideo.onloadedmetadata = () => {
       this.#localVideo.play();

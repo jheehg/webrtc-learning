@@ -4,29 +4,39 @@ class PeerConnection extends RTCPeerConnection {
   #isConnected = false;
   #socket = null;
   #roomName = null;
+  #remoteVideo = null;
 
-  constructor({ iceServers, socket, roomName } = { iceServers: defaultIceServers, socket: null, roomName: null }) {
+  constructor(
+    { iceServers, socket, roomName, remoteVideo } = {
+      iceServers: defaultIceServers,
+      socket: null,
+      roomName: null,
+      remoteVideo: null,
+    }
+  ) {
     super({ iceServers: iceServers });
     this.#socket = socket;
     this.#roomName = roomName;
-    this.#isConnected = true;
+    this.#remoteVideo = remoteVideo;
     this.#setupEventListeners();
+    this.#isConnected = true;
   }
 
   #setupEventListeners() {
     this.onicecandidate = (event) => {
+      console.log('[PeerConnection] onicecandidate', event.candidate);
       if (!this.#socket) {
-        console.error('Invalid socket');
+        console.error('[PeerConnection] Invalid socket');
         return;
       }
 
       if (!this.#roomName) {
-        console.error('Invalid roomName');
+        console.error('[PeerConnection] Invalid roomName');
         return;
       }
 
       if (!event.candidate) {
-        console.error('Invalid event');
+        console.error('[PeerConnection] Invalid event');
         return;
       }
 
@@ -34,8 +44,13 @@ class PeerConnection extends RTCPeerConnection {
     };
 
     this.ontrack = (event) => {
-      console.log('Remote track received:', event);
+      console.log('[PeerConnection] Remote track received:', event);
       this.#isConnected = true;
+
+      this.#remoteVideo.srcObject = event.streams[0];
+      this.#remoteVideo.onloadedmetadata = () => {
+        this.#remoteVideo.play();
+      };
     };
   }
 
